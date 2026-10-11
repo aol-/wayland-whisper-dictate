@@ -1,3 +1,3 @@
-# Wayland Whisper Dictate v0.1.0 (Initial Draft)
+# Wayland Whisper Dictate v1.0.0
 
-Initial local GPU voice dictation prototype using `pw-record`, `faster-whisper`, `wl-copy`, and `ydotool`.
+Added JSON config (`capitalize_first`, `strip_trailing_period`, `model_size`) and tuned CUDA `float16` transcription + auto-paste.
