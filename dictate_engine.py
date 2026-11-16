@@ -11,23 +11,6 @@ ENV_PYTHON = Path.home() / ".local/share/dictate-env/bin/python3"
 PID_FILE = Path("/tmp/dictate.pid")
 AUDIO_FILE = Path("/tmp/dictate_recording.wav")
 SOUND_DIR = Path("/usr/share/sounds/freedesktop/stereo")
-CONFIG_FILE = Path.home() / ".config/dictate/config.json"
-
-def load_config():
-    defaults = {
-        "capitalize_first": False,
-        "strip_trailing_period": False,
-        "model_size": "base.en"
-    }
-    if CONFIG_FILE.exists():
-        try:
-            import json
-            with open(CONFIG_FILE, "r") as f:
-                data = json.load(f)
-                defaults.update(data)
-        except Exception:
-            pass
-    return defaults
 
 def play_sound(sound_name):
     sound_path = SOUND_DIR / f"{sound_name}.oga"
@@ -110,11 +93,8 @@ def stop_and_transcribe():
         notify("Dictation Error", "faster-whisper not found in environment.", icon="dialog-error")
         return
 
-    config = load_config()
-    model_name = config.get("model_size", "base.en")
-
     try:
-        model = WhisperModel(model_name, device="cuda", compute_type="float16")
+        model = WhisperModel("base.en", device="cuda", compute_type="float16")
         segments, info = model.transcribe(
             str(AUDIO_FILE),
             beam_size=5,
@@ -123,10 +103,6 @@ def stop_and_transcribe():
             vad_parameters=dict(min_silence_duration_ms=400)
         )
         text = " ".join([seg.text.strip() for seg in segments]).strip()
-        if text and not config.get("capitalize_first", True):
-            text = text[0].lower() + text[1:]
-        if text and config.get("strip_trailing_period", False) and text.endswith("."):
-            text = text[:-1]
     except Exception as e:
         print("Transcription error:", e)
         notify("Transcription Error", str(e), icon="dialog-error")
@@ -151,21 +127,25 @@ def stop_and_transcribe():
         notify("Clipboard Error", str(e), icon="dialog-error")
         return
 
-    # Paste text into active window via ydotool (Ctrl+V)
-    time.sleep(0.08)
+    # Paste text via evdev /dev/uinput
     try:
-        sock = f"/run/user/{os.getuid()}/.ydotool_socket"
-        env = dict(os.environ, YDOTOOL_SOCKET=sock)
-        res = subprocess.run(
-            ["ydotool", "key", "-d", "15", "29:1", "47:1", "47:0", "29:0"],
-            capture_output=True,
-            text=True,
-            env=env
-        )
-        if res.returncode != 0:
-            print("ydotool error:", res.stderr)
+        import evdev
+        from evdev import ecodes
+
+        cap = {ecodes.EV_KEY: [ecodes.KEY_LEFTCTRL, ecodes.KEY_V]}
+        ui = evdev.UInput(cap, name="DictatePasteHelper")
+        time.sleep(0.05)
+        # Ctrl + V
+        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+        ui.write(ecodes.EV_KEY, ecodes.KEY_V, 1)
+        ui.syn()
+        time.sleep(0.05)
+        ui.write(ecodes.EV_KEY, ecodes.KEY_V, 0)
+        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+        ui.syn()
+        ui.close()
     except Exception as e:
-        print("ydotool paste exception:", e)
+        print("uinput paste error:", e)
 
     play_sound("complete")
     preview = text if len(text) <= 50 else text[:47] + "..."
